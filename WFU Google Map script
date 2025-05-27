@@ -1,0 +1,243 @@
+<script>
+
+/*-- Webflow.Ukraine Google Map script v1.06--*/
+
+/*-----------------------------------------
+Видали перед користуванням
+Структура твого DOM
+.map-box [нічого не потрібно робити]
+—— .map #map [тут буде карта]
+—— .point-info [поп-ап, зроби його display none після того як налаштуєш у flex. Position має бути Fixed]
+—————— .point-info-close [кнопка для закриття, роби на власний смак] 
+—— ...
+Атрибути для .map:
+data-lat = широта (ручне положення карти)
+data-lng = довгота (ручне положення карти)
+data-zoom = камера (ручне положення карти)
+data-box = block / modal / point (зверху карти / попап / на карті над точкою)
+data-position = X-Y-PX [left-top-30] (положення попапу для всіх точок, якщо data-box=point) 
+data-animation = 0 / 1 (без анімації / з анімаціїю)
+Атрибути для .point-info:
+data-lat = широта
+data-lng = довгота
+data-icon = url_іконки[40-50] (в квадратних дужках вкажи розмір, пікселі не додавай. Якщо не вкажеш,
+підготуй іконку 40х40рх)
+data-position = X-Y-PX [left-top-30] (окреме положення попапу, якщо data-box=point)
+-----------------------------------------*/
+
+  function initMap() {
+    const mapElement = document.getElementById("map");
+    const centerLat = parseFloat(mapElement.getAttribute("data-lat"));
+    const centerLng = parseFloat(mapElement.getAttribute("data-lng"));
+    const zoomLevel = parseInt(mapElement.getAttribute("data-zoom"));
+    const useAnimation = mapElement.getAttribute("data-animation") === "1";
+    const boxMode = mapElement.getAttribute("data-box");
+
+    const mapOptions = {};
+
+    if (!isNaN(centerLat) && !isNaN(centerLng)) {
+      mapOptions.center = { lat: centerLat, lng: centerLng };
+    }
+
+    if (!isNaN(zoomLevel)) {
+      mapOptions.zoom = zoomLevel;
+    }
+
+    const map = new google.maps.Map(mapElement, mapOptions);
+    const bounds = new google.maps.LatLngBounds();
+
+    const popups = document.querySelectorAll(".point-info");
+
+    class PopupOverlay extends google.maps.OverlayView {
+      constructor(position, contentEl) {
+        super();
+        this.position = position;
+        this.contentEl = contentEl;
+        this.div = null;
+      }
+
+      onAdd() {
+        this.div = document.createElement("div");
+        this.div.style.position = "absolute";
+        this.div.appendChild(this.contentEl);
+        const panes = this.getPanes();
+        panes.overlayMouseTarget.appendChild(this.div);
+      }
+
+      draw() {
+        const projection = this.getProjection();
+        const point = projection.fromLatLngToDivPixel(this.position);
+        if (point && this.div) {
+          const positionAttr = this.contentEl.getAttribute("data-position") || document.getElementById("map").getAttribute("data-position") || "center-center-0";
+          const [xPos, yPos, offsetStr] = positionAttr.split("-");
+          const offset = parseInt(offsetStr) || 0;
+
+          let left = point.x;
+          let top = point.y;
+
+          const popupRect = this.div.getBoundingClientRect();
+          const width = popupRect.width || 0;
+          const height = popupRect.height || 0;
+
+          // X axis alignment
+          if (xPos === "left") {
+            left -= width + offset;
+          } else if (xPos === "center") {
+            left -= width / 2;
+          } else if (xPos === "right") {
+            left += offset;
+          }
+
+          // Y axis alignment
+          if (yPos === "top") {
+            top -= height + offset;
+          } else if (yPos === "center") {
+            top -= height / 2;
+          } else if (yPos === "bottom") {
+            top += offset;
+          }
+
+          this.div.style.left = `${left}px`;
+          this.div.style.top = `${top}px`;
+        }
+      }
+
+      onRemove() {
+        if (this.div && this.div.parentNode) {
+          this.div.parentNode.removeChild(this.div);
+        }
+      }
+    }
+
+    const activeOverlays = [];
+
+    popups.forEach((popup) => {
+      const lat = parseFloat(popup.getAttribute("data-lat"));
+      const lng = parseFloat(popup.getAttribute("data-lng"));
+      const iconUrl = popup.getAttribute("data-icon");
+
+      if (!isNaN(lat) && !isNaN(lng)) {
+        const markerOptions = {
+          position: { lat, lng },
+          map: map
+        };
+
+      if (iconUrl) {
+        const match = iconUrl.match(/^(.*)\[(\d+)-(\d+)\]$/);
+        if (match) {
+          markerOptions.icon = {
+            url: match[1],
+            scaledSize: new google.maps.Size(parseInt(match[2]), parseInt(match[3]))
+          };
+        } else {
+          markerOptions.icon = {
+            url: iconUrl,
+            scaledSize: new google.maps.Size(40, 40)
+          };
+        }
+      }
+
+        const marker = new google.maps.Marker(markerOptions);
+        bounds.extend({ lat, lng });
+
+        marker.addListener("click", () => {
+          document.querySelectorAll(".point-info").forEach(p => {
+            if (p !== popup) {
+              p.style.display = "none";
+              p.classList.remove("animated", "fade-out");
+            }
+          });
+
+          activeOverlays.forEach(o => o.setMap(null));
+          activeOverlays.length = 0;
+
+          if (boxMode === "point") {
+            popup.style.display = "block";
+            popup.style.position = "static";
+            const overlay = new PopupOverlay(marker.getPosition(), popup);
+            overlay.setMap(map);
+            activeOverlays.push(overlay);
+          } else {
+            popup.style.display = "flex";
+          }
+
+          if (useAnimation) {
+            popup.classList.remove("fade-out");
+            void popup.offsetWidth;
+            popup.classList.add("animated");
+          }
+
+          if (boxMode === "modal") {
+            document.body.style.overflow = "hidden";
+          }
+        });
+      }
+    });
+
+    if (!isNaN(centerLat) && !isNaN(centerLng)) {
+      map.setCenter({ lat: centerLat, lng: centerLng });
+    } else if (!bounds.isEmpty()) {
+      map.fitBounds(bounds);
+    }
+
+    document.addEventListener("click", function(event) {
+      if (event.target.classList.contains("point-info-close")) {
+        const popup = event.target.closest(".point-info");
+        if (popup) {
+          if (useAnimation) {
+            popup.classList.remove("animated");
+            popup.classList.add("fade-out");
+            setTimeout(() => {
+              popup.style.display = "none";
+              popup.classList.remove("fade-out");
+              if (boxMode === "modal") {
+                document.body.style.overflow = "";
+              }
+            }, 200);
+          } else {
+            popup.style.display = "none";
+            if (boxMode === "modal") {
+              document.body.style.overflow = "";
+            }
+          }
+        }
+      }
+    });
+  }
+</script>
+
+<style>
+  .point-info.animated {
+    animation: fadeZoomIn 0.3s ease both;
+  }
+
+  .point-info.fade-out {
+    animation: fadeZoomOut 0.2s ease forwards;
+  }
+
+  @keyframes fadeZoomIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes fadeZoomOut {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+  }
+</style>
+
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=PAST_YOUR_GOOGLE_MAPS_API&callback=initMap">
+</script>
